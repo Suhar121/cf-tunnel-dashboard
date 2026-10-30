@@ -89,6 +89,11 @@ export const RoutesModal: React.FC<RoutesModalProps> = ({
     e.preventDefault();
     if (!subdomain.trim() || !service.trim()) return;
 
+    if (protectWithAccess && !allowedEmails.trim() && !defaultAdminEmail) {
+      setError("Please enter an email address for Cloudflare Access protection in the 'Allowed Email' box below, or set a Default Admin Email in Settings.");
+      return;
+    }
+
     setAdding(true);
     setError(null);
 
@@ -124,12 +129,13 @@ export const RoutesModal: React.FC<RoutesModalProps> = ({
 
   const handleToggleProtect = async (route: IngressRoute) => {
     const nextState = !route.is_protected;
-    const targetEmail = route.allowed_emails || allowedEmails || defaultAdminEmail;
+    let targetEmail = route.allowed_emails || allowedEmails || defaultAdminEmail;
 
     if (nextState && !targetEmail) {
-      const emailInput = prompt("Enter the allowed email for Cloudflare Access Zero Trust OTP login:");
-      if (!emailInput) return;
-      targetEmail && (setAllowedEmails(emailInput));
+      const emailInput = window.prompt("Enter the email address to receive Cloudflare Access login PINs (e.g. admin@example.com):");
+      if (!emailInput || !emailInput.trim()) return;
+      targetEmail = emailInput.trim();
+      setAllowedEmails(targetEmail);
     }
 
     try {
@@ -370,11 +376,16 @@ export const RoutesModal: React.FC<RoutesModalProps> = ({
                   <div className="flex items-center gap-2 flex-1 max-w-sm">
                     <span className="text-[11px] text-neutral-400 shrink-0">Allowed:</span>
                     <input
-                      type="text"
+                      type="email"
+                      required={protectWithAccess}
                       value={allowedEmails}
                       onChange={(e) => setAllowedEmails(e.target.value)}
-                      placeholder="admin@example.com (comma separated)"
-                      className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-orange-500/60 font-mono"
+                      placeholder={defaultAdminEmail ? `Default: ${defaultAdminEmail}` : "you@example.com (receives OTP PIN)"}
+                      className={`w-full bg-neutral-900 border rounded-lg px-3 py-1.5 text-xs text-neutral-200 focus:outline-none font-mono ${
+                        !allowedEmails.trim() && !defaultAdminEmail
+                          ? "border-amber-500/80 focus:border-amber-400 ring-1 ring-amber-500/30"
+                          : "border-neutral-800 focus:border-orange-500/60"
+                      }`}
                     />
                   </div>
                 )}
