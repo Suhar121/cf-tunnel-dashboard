@@ -402,6 +402,33 @@ impl CloudflareClient {
         Ok(())
     }
 
+    /// Discover configured identity providers from existing access applications
+    pub async fn discover_allowed_idps(&self) -> Vec<String> {
+        let url = format!(
+            "https://api.cloudflare.com/client/v4/accounts/{}/access/apps",
+            self.account_id
+        );
+        let mut idps = Vec::new();
+        if let Ok(resp) = self.client.get(&url).headers(self.headers()).send().await {
+            if let Ok(body) = resp.json::<Value>().await {
+                if let Some(apps) = body["result"].as_array() {
+                    for app in apps {
+                        if let Some(app_idps) = app["allowed_idps"].as_array() {
+                            for idp in app_idps {
+                                if let Some(s) = idp.as_str() {
+                                    if !idps.contains(&s.to_string()) {
+                                        idps.push(s.to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        idps
+    }
+
     /// Find an existing Access application by domain
     pub async fn find_access_app_by_domain(&self, domain: &str) -> Result<Option<String>> {
         let url = format!(
@@ -435,8 +462,31 @@ impl CloudflareClient {
         domain: &str,
         allowed_emails: &[String],
     ) -> Result<String> {
+        let discovered_idps = self.discover_allowed_idps().await;
+
         // Check if an Access Application already exists for this domain
         let app_id = if let Ok(Some(existing_id)) = self.find_access_app_by_domain(domain).await {
+            // Update existing app to ensure allowed_idps and settings are active
+            let update_url = format!(
+                "https://api.cloudflare.com/client/v4/accounts/{}/access/apps/{}",
+                self.account_id, existing_id
+            );
+            let mut update_payload = serde_json::json!({
+                "name": name,
+                "domain": domain,
+                "type": "self_hosted",
+            });
+            if !discovered_idps.is_empty() {
+                update_payload["allowed_idps"] = serde_json::json!(discovered_idps);
+            }
+            let _ = self
+                .client
+                .put(&update_url)
+                .headers(self.headers())
+                .json(&update_payload)
+                .send()
+                .await;
+
             existing_id
         } else {
             let url = format!(
@@ -444,13 +494,17 @@ impl CloudflareClient {
                 self.account_id
             );
 
-            let payload = serde_json::json!({
+            let mut payload = serde_json::json!({
                 "name": name,
                 "domain": domain,
                 "type": "self_hosted",
                 "session_duration": "24h",
                 "auto_redirect_to_identity": false
             });
+
+            if !discovered_idps.is_empty() {
+                payload["allowed_idps"] = serde_json::json!(discovered_idps);
+            }
 
             let resp = self
                 .client
@@ -474,7 +528,7 @@ impl CloudflareClient {
                 .to_string()
         };
 
-        // Attach email authorization policy if emails provided
+        // Attach or update email authorization policy if emails provided
         if !allowed_emails.is_empty() {
             let policy_url = format!(
                 "https://api.cloudflare.com/client/v4/accounts/{}/access/apps/{}/policies",
@@ -494,13 +548,35 @@ impl CloudflareClient {
                     "include": include_rules
                 });
 
-                let _ = self
-                    .client
-                    .post(&policy_url)
-                    .headers(self.headers())
-                    .json(&policy_payload)
-                    .send()
-                    .await;
+                // Check if a policy already exists on this application
+                let existing_policy_id = if let Ok(resp) = self.client.get(&policy_url).headers(self.headers()).send().await {
+                    if let Ok(body) = resp.json::<Value>().await {
+                        body["result"].as_array().and_then(|arr| arr.first()).and_then(|p| p["id"].as_str()).map(|s| s.to_string())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                if let Some(pol_id) = existing_policy_id {
+                    let update_pol_url = format!("{}/{}", policy_url, pol_id);
+                    let _ = self
+                        .client
+                        .put(&update_pol_url)
+                        .headers(self.headers())
+                        .json(&policy_payload)
+                        .send()
+                        .await;
+                } else {
+                    let _ = self
+                        .client
+                        .post(&policy_url)
+                        .headers(self.headers())
+                        .json(&policy_payload)
+                        .send()
+                        .await;
+                }
             }
         }
 
@@ -535,5 +611,19 @@ impl CloudflareClient {
         }
 
         Ok(())
+    }
+
+    pub async fn debug_app_and_policies(&self, app_id: &str) -> Result<(Value, Value)> {
+        let app_url = format!("https://api.cloudflare.com/client/v4/accounts/{}/access/apps/{}", self.account_id, app_id);
+        let pol_url = format!("https://api.cloudflare.com/client/v4/accounts/{}/access/apps/{}/policies", self.account_id, app_id);
+        let r1: Value = self.client.get(&app_url).headers(self.headers()).send().await?.json().await?;
+        let r2: Value = self.client.get(&pol_url).headers(self.headers()).send().await?.json().await?;
+        Ok((r1, r2))
+    }
+
+    pub async fn get_access_logs(&self) -> Result<Value> {
+        let url = format!("https://api.cloudflare.com/client/v4/accounts/{}/access/logs/access_requests?limit=10", self.account_id);
+        let r: Value = self.client.get(&url).headers(self.headers()).send().await?.json().await?;
+        Ok(r)
     }
 }

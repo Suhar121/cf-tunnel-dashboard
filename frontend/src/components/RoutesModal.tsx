@@ -132,7 +132,7 @@ export const RoutesModal: React.FC<RoutesModalProps> = ({
     let targetEmail = route.allowed_emails || allowedEmails || defaultAdminEmail;
 
     if (nextState && !targetEmail) {
-      const emailInput = window.prompt("Enter the email address to receive Cloudflare Access login PINs (e.g. admin@example.com):");
+      const emailInput = window.prompt("Enter the email address(es) to receive Cloudflare Access login PINs (e.g. you@example.com):");
       if (!emailInput || !emailInput.trim()) return;
       targetEmail = emailInput.trim();
       setAllowedEmails(targetEmail);
@@ -148,6 +148,30 @@ export const RoutesModal: React.FC<RoutesModalProps> = ({
       onRoutesUpdated();
     } catch (err: any) {
       setError(err.message || "Failed to toggle route protection");
+    } finally {
+      setTogglingRouteId(null);
+    }
+  };
+
+  const handleEditEmails = async (route: IngressRoute) => {
+    const current = route.allowed_emails || defaultAdminEmail || "";
+    const emailInput = window.prompt("Edit allowed emails (comma-separated):", current);
+    if (emailInput === null) return;
+    if (!emailInput.trim()) {
+      alert("At least one email is required for Cloudflare Access protection.");
+      return;
+    }
+
+    try {
+      setTogglingRouteId(route.id);
+      await toggleRouteProtection(machine.id, route.id, {
+        protect: true,
+        allowed_emails: emailInput.trim(),
+      });
+      await loadData();
+      onRoutesUpdated();
+    } catch (err: any) {
+      setError(err.message || "Failed to update allowed emails");
     } finally {
       setTogglingRouteId(null);
     }
@@ -224,7 +248,7 @@ export const RoutesModal: React.FC<RoutesModalProps> = ({
           )}
 
           {/* Discovered Services Shelf */}
-          {discovered.length > 0 && (
+          {discovered.length > 0 ? (
             <div className="bg-gradient-to-r from-blue-950/30 to-purple-950/20 border border-blue-900/40 rounded-xl p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-blue-200 flex items-center gap-1.5">
@@ -269,6 +293,20 @@ export const RoutesModal: React.FC<RoutesModalProps> = ({
                   </div>
                 ))}
               </div>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-neutral-900/30 border border-neutral-800/60 text-[11px] text-neutral-400">
+              <span className="flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-neutral-500" />
+                <span>No local services reported yet (only verified listening ports will show here)</span>
+              </span>
+              <button
+                type="button"
+                onClick={loadData}
+                className="text-[10px] text-orange-400 hover:underline cursor-pointer"
+              >
+                Refresh
+              </button>
             </div>
           )}
 
@@ -376,11 +414,11 @@ export const RoutesModal: React.FC<RoutesModalProps> = ({
                   <div className="flex items-center gap-2 flex-1 max-w-sm">
                     <span className="text-[11px] text-neutral-400 shrink-0">Allowed:</span>
                     <input
-                      type="email"
+                      type="text"
                       required={protectWithAccess}
                       value={allowedEmails}
                       onChange={(e) => setAllowedEmails(e.target.value)}
-                      placeholder={defaultAdminEmail ? `Default: ${defaultAdminEmail}` : "you@example.com (receives OTP PIN)"}
+                      placeholder={defaultAdminEmail ? `Default: ${defaultAdminEmail}` : "user1@gmail.com, user2@gmail.com"}
                       className={`w-full bg-neutral-900 border rounded-lg px-3 py-1.5 text-xs text-neutral-200 focus:outline-none font-mono ${
                         !allowedEmails.trim() && !defaultAdminEmail
                           ? "border-amber-500/80 focus:border-amber-400 ring-1 ring-amber-500/30"
@@ -437,14 +475,25 @@ export const RoutesModal: React.FC<RoutesModalProps> = ({
                           </span>
 
                           {r.is_protected ? (
-                            <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20 font-medium flex items-center gap-1">
-                              <Lock className="w-3 h-3 text-amber-400" />
-                              Zero Trust PIN
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20 font-medium flex items-center gap-1.5">
+                              <Lock className="w-3 h-3 text-amber-400 shrink-0" />
+                              <span>Zero Trust PIN</span>
                               {r.allowed_emails && (
-                                <span className="text-neutral-400 text-[9px] font-mono ml-0.5">
+                                <span className="text-neutral-400 text-[9px] font-mono">
                                   ({r.allowed_emails})
                                 </span>
                               )}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleEditEmails(r);
+                                }}
+                                title="Edit allowed emails"
+                                className="text-amber-400 hover:text-amber-200 underline text-[9px] ml-1 cursor-pointer font-sans"
+                              >
+                                Edit
+                              </button>
                             </span>
                           ) : (
                             <span className="text-[10px] px-2 py-0.5 rounded bg-neutral-800 text-neutral-400 border border-neutral-700/60 font-medium flex items-center gap-1">

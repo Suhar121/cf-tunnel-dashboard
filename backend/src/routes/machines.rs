@@ -593,6 +593,16 @@ pub async fn list_discovered_services_handler(
     Ok(Json(json!({ "success": true, "services": services })))
 }
 
+pub async fn clear_discovered_services_handler(
+    State(pool): State<DbPool>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    if let Ok(conn) = pool.lock() {
+        let _ = conn.execute("DELETE FROM discovered_services WHERE machine_id = ?1", rusqlite::params![id]);
+    }
+    Ok(Json(json!({ "success": true, "message": "Discovered services cleared" })))
+}
+
 pub async fn expose_discovered_handler(
     State(pool): State<DbPool>,
     Path(id): Path<String>,
@@ -669,4 +679,19 @@ pub async fn sync_machine_handler(
     log_event(&pool, "INFO", &format!("Manually re-synced routes for machine {}", machine.name));
 
     Ok(Json(json!({ "success": true, "message": "Successfully synchronized routes and DNS with Cloudflare" })))
+}
+
+pub async fn debug_access_policy_handler(
+    State(pool): State<DbPool>,
+) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    let cf_settings = get_cloudflare_settings(&pool)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))))?
+        .unwrap();
+    let client = CloudflareClient::new(cf_settings.api_token, cf_settings.account_id);
+    let app_id = "d8625046-88e6-474e-b6f0-81b9dcf09a3f";
+    let (app, policies) = client.debug_app_and_policies(app_id).await.map_err(|e| {
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() })))
+    })?;
+    let access_logs = client.get_access_logs().await.unwrap_or_else(|e| json!({ "error": e.to_string() }));
+    Ok(Json(json!({ "app": app, "policies": policies, "access_logs": access_logs })))
 }
