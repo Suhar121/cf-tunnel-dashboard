@@ -231,9 +231,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigured }) => {
               <span>Test Token</span>
             </button>
           </div>
-          <p className="text-[11px] text-neutral-500">
-            Token Permissions required: <span className="text-neutral-300">Account.Cloudflare Tunnel:Edit</span> and <span className="text-neutral-300">Zone.DNS:Edit</span> (All Zones).
-          </p>
+          <div className="text-[11px] text-neutral-400 space-y-1 bg-neutral-950/60 border border-neutral-800/80 rounded-xl p-3">
+            <span className="font-semibold text-neutral-300">Required Token Permissions:</span>
+            <ul className="list-disc list-inside space-y-0.5 text-neutral-400 pl-1">
+              <li><strong className="text-orange-400">Account</strong> ➔ <strong className="text-neutral-200">Cloudflare Tunnel</strong> ➔ <strong className="text-neutral-200">Edit</strong> (creates & manages tunnels)</li>
+              <li><strong className="text-orange-400">Zone</strong> ➔ <strong className="text-neutral-200">DNS</strong> ➔ <strong className="text-neutral-200">Edit</strong> (creates CNAME subdomain records)</li>
+              <li><strong className="text-orange-400">Account</strong> ➔ <strong className="text-neutral-200">Access: Apps and Policies</strong> ➔ <strong className="text-neutral-200">Edit</strong> (enables 1-click Zero Trust Email PIN)</li>
+            </ul>
+          </div>
         </div>
 
         {/* Test Result Box */}

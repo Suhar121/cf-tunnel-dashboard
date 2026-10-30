@@ -128,6 +128,7 @@ In the **Cloudflare API** tab of the dashboard:
    - **Account** ➔ `Cloudflare Tunnel` ➔ `Edit`
    - **Zone** ➔ `DNS` ➔ `Edit`
    - **Zone** ➔ `Zone` ➔ `Read`
+   - **Account** ➔ `Access: Apps and Policies` ➔ `Edit` (for 1-click Zero Trust Email PIN protection)
 2. Provide your **Account ID** (found in the sidebar of any domain in the Cloudflare dashboard).
 3. The dashboard will automatically fetch your active domains and make them available in the node creator.
 
