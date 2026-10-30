@@ -34,5 +34,9 @@ The server binds to `0.0.0.0:8080`.
 | `GET` | `/api/machines/:id/routes` | Get active ingress routes for a machine |
 | `POST` | `/api/machines/:id/routes` | Add ingress route & upsert DNS CNAME |
 | `DELETE` | `/api/machines/:id/routes/:route_id` | Delete ingress route & DNS record |
+| `POST` | `/api/machines/:id/routes/:route_id/toggle-protect` | Toggle Cloudflare Zero Trust Access Email PIN |
+| `GET` | `/api/machines/:id/discovered` | Fetch auto-discovered ports & Docker containers |
+| `POST` | `/api/machines/:id/expose-discovered` | 1-click expose an auto-discovered service |
+| `POST` | `/api/agent/services` | Report discovered listening ports from node |
 | `GET` | `/api/logs` | Real-time system audit logs |
 | `GET` | `/setup/:token.sh` | Dynamic bash installation script |

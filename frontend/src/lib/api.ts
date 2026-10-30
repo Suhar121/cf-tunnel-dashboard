@@ -14,6 +14,7 @@ export interface Machine {
   created_at: string;
   last_seen: string | null;
   routes_count?: number;
+  discovered_count?: number;
 }
 
 export interface IngressRoute {
@@ -23,8 +24,23 @@ export interface IngressRoute {
   hostname: string;
   service: string;
   dns_record_id: string | null;
+  access_app_id?: string | null;
+  is_protected: boolean;
+  allowed_emails?: string | null;
   status: "synced" | "pending" | "dns_failed" | "config_failed";
   created_at: string;
+}
+
+export interface DiscoveredService {
+  id: string;
+  machine_id: string;
+  name: string;
+  port: number;
+  protocol: string;
+  source: "docker" | "system";
+  suggested_subdomain: string;
+  is_exposed: boolean;
+  last_seen: string;
 }
 
 export interface CloudflareSettings {
@@ -32,6 +48,7 @@ export interface CloudflareSettings {
   account_id?: string;
   masked_token?: string;
   server_url?: string;
+  admin_email?: string | null;
   detected_lan_ip?: string;
 }
 
@@ -72,6 +89,7 @@ export async function saveSettings(data: {
   api_token: string;
   account_id: string;
   server_url?: string;
+  admin_email?: string;
 }): Promise<{ success: boolean; message: string }> {
   const res = await fetch(`${API_BASE}/api/cloudflare/config`, {
     method: "POST",
@@ -111,6 +129,7 @@ export async function fetchMachines(): Promise<Machine[]> {
 export async function fetchMachineDetails(id: string): Promise<{
   machine: Machine;
   routes: IngressRoute[];
+  discovered?: DiscoveredService[];
   curl_command: string;
   direct_command?: string;
   tunnel_token?: string;
@@ -147,7 +166,12 @@ export async function deleteMachine(id: string): Promise<void> {
 
 export async function addRoute(
   machineId: string,
-  data: { subdomain: string; service: string }
+  data: {
+    subdomain: string;
+    service: string;
+    protect?: boolean;
+    allowed_emails?: string;
+  }
 ): Promise<IngressRoute> {
   const res = await fetch(`${API_BASE}/api/machines/${machineId}/routes`, {
     method: "POST",
@@ -167,6 +191,50 @@ export async function deleteRoute(machineId: string, routeId: string): Promise<v
   if (!res.ok) throw new Error(json.error || "Failed to delete route");
 }
 
+export async function toggleRouteProtection(
+  machineId: string,
+  routeId: string,
+  data: {
+    protect: boolean;
+    allowed_emails?: string;
+  }
+): Promise<{ success: boolean; is_protected: boolean; allowed_emails?: string }> {
+  const res = await fetch(`${API_BASE}/api/machines/${machineId}/routes/${routeId}/toggle-protect`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || "Failed to toggle route protection");
+  return json;
+}
+
+export async function fetchDiscoveredServices(machineId: string): Promise<DiscoveredService[]> {
+  const res = await fetch(`${API_BASE}/api/machines/${machineId}/discovered`);
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || "Failed to fetch discovered services");
+  return json.services || [];
+}
+
+export async function exposeDiscoveredService(
+  machineId: string,
+  data: {
+    service_id: string;
+    subdomain: string;
+    protect?: boolean;
+    allowed_emails?: string;
+  }
+): Promise<IngressRoute> {
+  const res = await fetch(`${API_BASE}/api/machines/${machineId}/expose-discovered`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || "Failed to expose service");
+  return json;
+}
+
 export async function syncMachine(machineId: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/machines/${machineId}/sync`, {
     method: "POST",
@@ -181,4 +249,3 @@ export async function fetchLogs(): Promise<AuditLog[]> {
   if (!res.ok) throw new Error(json.error || "Failed to fetch logs");
   return json.logs || [];
 }
-

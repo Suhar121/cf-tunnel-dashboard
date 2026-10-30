@@ -77,6 +77,8 @@ Whenever you set up a new remote server, lab machine, or VM:
 
 - **Zero-Touch Provisioning:** Generates commands with embedded tokens for Ubuntu/Debian (`.deb`) and generic Linux (`binary`).
 - **Edge Status Sync:** Automatically polls Cloudflare's Edge API (`cfd_tunnel/{id}`) to detect when nodes come online without requiring open local router ports.
+- **Docker & Port Auto-Discovery:** Remote machines scan for listening TCP ports and running Docker containers (`docker ps`), streaming them to the dashboard for 1-click subdomain exposure.
+- **Zero Trust Web App Protection:** 1-click protect exposed subdomains using Cloudflare Access Email PIN verification, ensuring only authorized email addresses can access sensitive web applications.
 - **Dynamic Ingress Manager:** Add or delete subdomains with automatic DNS CNAME record upsertion and automatic conflict resolution.
 - **Firewall-Immune Deployment:** Uses direct Cloudflare CDN installation so local Windows Defender firewalls or Wi-Fi AP isolation never block setup.
 - **Native SSH Support:** Pre-configured SSH proxy command for instant `ssh homelab` terminal access from anywhere in the world.

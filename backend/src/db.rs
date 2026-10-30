@@ -1,6 +1,7 @@
 use rusqlite::{params, Connection, Result};
 use std::sync::{Arc, Mutex};
-use crate::models::{Machine, IngressRoute, CloudflareSettings};
+use uuid::Uuid;
+use crate::models::{CloudflareSettings, DiscoveredService, DiscoveredServiceItem, IngressRoute, Machine};
 
 pub type DbPool = Arc<Mutex<Connection>>;
 
@@ -38,8 +39,25 @@ pub fn init_db(path: &str) -> Result<DbPool> {
             hostname TEXT NOT NULL,
             service TEXT NOT NULL,
             dns_record_id TEXT,
+            access_app_id TEXT,
+            is_protected INTEGER DEFAULT 0,
+            allowed_emails TEXT,
             status TEXT NOT NULL,
             created_at TEXT NOT NULL,
+            FOREIGN KEY(machine_id) REFERENCES machines(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS discovered_services (
+            id TEXT PRIMARY KEY,
+            machine_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            port INTEGER NOT NULL,
+            protocol TEXT NOT NULL,
+            source TEXT NOT NULL,
+            suggested_subdomain TEXT NOT NULL,
+            is_exposed INTEGER DEFAULT 0,
+            last_seen TEXT NOT NULL,
+            UNIQUE(machine_id, port, protocol),
             FOREIGN KEY(machine_id) REFERENCES machines(id) ON DELETE CASCADE
         );
 
@@ -51,6 +69,25 @@ pub fn init_db(path: &str) -> Result<DbPool> {
         );
         "
     )?;
+
+    // Safe schema migrations for existing routes table
+    {
+        let mut stmt = conn.prepare("PRAGMA table_info(routes)")?;
+        let cols: Vec<String> = stmt
+            .query_map([], |row| row.get(1))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        if !cols.contains(&"access_app_id".to_string()) {
+            let _ = conn.execute("ALTER TABLE routes ADD COLUMN access_app_id TEXT", []);
+        }
+        if !cols.contains(&"is_protected".to_string()) {
+            let _ = conn.execute("ALTER TABLE routes ADD COLUMN is_protected INTEGER DEFAULT 0", []);
+        }
+        if !cols.contains(&"allowed_emails".to_string()) {
+            let _ = conn.execute("ALTER TABLE routes ADD COLUMN allowed_emails TEXT", []);
+        }
+    }
 
     Ok(Arc::new(Mutex::new(conn)))
 }
@@ -79,6 +116,7 @@ pub fn get_cloudflare_settings(pool: &DbPool) -> Result<Option<CloudflareSetting
     let api_token = get_setting(pool, "cf_api_token")?;
     let account_id = get_setting(pool, "cf_account_id")?;
     let server_url = get_setting(pool, "server_url")?;
+    let admin_email = get_setting(pool, "cf_admin_email")?;
 
     match (api_token, account_id) {
         (Some(token), Some(acc_id)) if !token.is_empty() && !acc_id.is_empty() => {
@@ -86,6 +124,7 @@ pub fn get_cloudflare_settings(pool: &DbPool) -> Result<Option<CloudflareSetting
                 api_token: token,
                 account_id: acc_id,
                 server_url,
+                admin_email,
             }))
         }
         _ => Ok(None),
@@ -245,6 +284,7 @@ pub fn update_machine_status(
 pub fn delete_machine(pool: &DbPool, id: &str) -> Result<()> {
     let conn = pool.lock().unwrap();
     conn.execute("DELETE FROM routes WHERE machine_id = ?1", params![id])?;
+    conn.execute("DELETE FROM discovered_services WHERE machine_id = ?1", params![id])?;
     conn.execute("DELETE FROM machines WHERE id = ?1", params![id])?;
     Ok(())
 }
@@ -252,11 +292,12 @@ pub fn delete_machine(pool: &DbPool, id: &str) -> Result<()> {
 pub fn list_routes_for_machine(pool: &DbPool, machine_id: &str) -> Result<Vec<IngressRoute>> {
     let conn = pool.lock().unwrap();
     let mut stmt = conn.prepare(
-        "SELECT id, machine_id, subdomain, hostname, service, dns_record_id, status, created_at
+        "SELECT id, machine_id, subdomain, hostname, service, dns_record_id, access_app_id, is_protected, allowed_emails, status, created_at
          FROM routes WHERE machine_id = ?1 ORDER BY created_at ASC"
     )?;
 
     let rows = stmt.query_map(params![machine_id], |row| {
+        let is_prot_int: i64 = row.get(7).unwrap_or(0);
         Ok(IngressRoute {
             id: row.get(0)?,
             machine_id: row.get(1)?,
@@ -264,8 +305,11 @@ pub fn list_routes_for_machine(pool: &DbPool, machine_id: &str) -> Result<Vec<In
             hostname: row.get(3)?,
             service: row.get(4)?,
             dns_record_id: row.get(5)?,
-            status: row.get(6)?,
-            created_at: row.get(7)?,
+            access_app_id: row.get(6)?,
+            is_protected: is_prot_int == 1,
+            allowed_emails: row.get(8)?,
+            status: row.get(9)?,
+            created_at: row.get(10)?,
         })
     })?;
 
@@ -276,11 +320,39 @@ pub fn list_routes_for_machine(pool: &DbPool, machine_id: &str) -> Result<Vec<In
     Ok(list)
 }
 
+pub fn get_route(pool: &DbPool, route_id: &str) -> Result<Option<IngressRoute>> {
+    let conn = pool.lock().unwrap();
+    let mut stmt = conn.prepare(
+        "SELECT id, machine_id, subdomain, hostname, service, dns_record_id, access_app_id, is_protected, allowed_emails, status, created_at
+         FROM routes WHERE id = ?1"
+    )?;
+
+    let mut rows = stmt.query(params![route_id])?;
+    if let Some(row) = rows.next()? {
+        let is_prot_int: i64 = row.get(7).unwrap_or(0);
+        Ok(Some(IngressRoute {
+            id: row.get(0)?,
+            machine_id: row.get(1)?,
+            subdomain: row.get(2)?,
+            hostname: row.get(3)?,
+            service: row.get(4)?,
+            dns_record_id: row.get(5)?,
+            access_app_id: row.get(6)?,
+            is_protected: is_prot_int == 1,
+            allowed_emails: row.get(8)?,
+            status: row.get(9)?,
+            created_at: row.get(10)?,
+        }))
+    } else {
+        Ok(None)
+    }
+}
+
 pub fn insert_route(pool: &DbPool, route: &IngressRoute) -> Result<()> {
     let conn = pool.lock().unwrap();
     conn.execute(
-        "INSERT INTO routes (id, machine_id, subdomain, hostname, service, dns_record_id, status, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO routes (id, machine_id, subdomain, hostname, service, dns_record_id, access_app_id, is_protected, allowed_emails, status, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         params![
             route.id,
             route.machine_id,
@@ -288,6 +360,9 @@ pub fn insert_route(pool: &DbPool, route: &IngressRoute) -> Result<()> {
             route.hostname,
             route.service,
             route.dns_record_id,
+            route.access_app_id,
+            if route.is_protected { 1 } else { 0 },
+            route.allowed_emails,
             route.status,
             route.created_at,
         ],
@@ -304,11 +379,163 @@ pub fn update_route_dns(pool: &DbPool, route_id: &str, dns_record_id: Option<&st
     Ok(())
 }
 
+pub fn update_route_access(
+    pool: &DbPool,
+    route_id: &str,
+    access_app_id: Option<&str>,
+    is_protected: bool,
+    allowed_emails: Option<&str>,
+) -> Result<()> {
+    let conn = pool.lock().unwrap();
+    conn.execute(
+        "UPDATE routes SET access_app_id = ?1, is_protected = ?2, allowed_emails = ?3 WHERE id = ?4",
+        params![
+            access_app_id,
+            if is_protected { 1 } else { 0 },
+            allowed_emails,
+            route_id
+        ],
+    )?;
+    Ok(())
+}
+
 pub fn delete_route(pool: &DbPool, route_id: &str) -> Result<()> {
     let conn = pool.lock().unwrap();
     conn.execute("DELETE FROM routes WHERE id = ?1", params![route_id])?;
     Ok(())
 }
+
+// ---------------- Discovered Services ----------------
+
+pub fn list_discovered_services(pool: &DbPool, machine_id: &str) -> Result<Vec<DiscoveredService>> {
+    let conn = pool.lock().unwrap();
+    let mut stmt = conn.prepare(
+        "SELECT id, machine_id, name, port, protocol, source, suggested_subdomain, is_exposed, last_seen
+         FROM discovered_services WHERE machine_id = ?1 ORDER BY is_exposed ASC, port ASC"
+    )?;
+
+    let rows = stmt.query_map(params![machine_id], |row| {
+        let is_exp_int: i64 = row.get(7).unwrap_or(0);
+        Ok(DiscoveredService {
+            id: row.get(0)?,
+            machine_id: row.get(1)?,
+            name: row.get(2)?,
+            port: row.get::<_, u16>(3)?,
+            protocol: row.get(4)?,
+            source: row.get(5)?,
+            suggested_subdomain: row.get(6)?,
+            is_exposed: is_exp_int == 1,
+            last_seen: row.get(8)?,
+        })
+    })?;
+
+    let mut list = Vec::new();
+    for item in rows {
+        list.push(item?);
+    }
+    Ok(list)
+}
+
+pub fn get_discovered_service(pool: &DbPool, service_id: &str) -> Result<Option<DiscoveredService>> {
+    let conn = pool.lock().unwrap();
+    let mut stmt = conn.prepare(
+        "SELECT id, machine_id, name, port, protocol, source, suggested_subdomain, is_exposed, last_seen
+         FROM discovered_services WHERE id = ?1"
+    )?;
+
+    let mut rows = stmt.query(params![service_id])?;
+    if let Some(row) = rows.next()? {
+        let is_exp_int: i64 = row.get(7).unwrap_or(0);
+        Ok(Some(DiscoveredService {
+            id: row.get(0)?,
+            machine_id: row.get(1)?,
+            name: row.get(2)?,
+            port: row.get::<_, u16>(3)?,
+            protocol: row.get(4)?,
+            source: row.get(5)?,
+            suggested_subdomain: row.get(6)?,
+            is_exposed: is_exp_int == 1,
+            last_seen: row.get(8)?,
+        }))
+    } else {
+        Ok(None)
+    }
+}
+
+pub fn upsert_discovered_services(
+    pool: &DbPool,
+    machine_id: &str,
+    services: &[DiscoveredServiceItem],
+) -> Result<()> {
+    let conn = pool.lock().unwrap();
+    let now = chrono::Utc::now().to_rfc3339();
+
+    // Check existing routes to determine if any port is already exposed
+    let mut routes_stmt = conn.prepare("SELECT service FROM routes WHERE machine_id = ?1")?;
+    let active_services: Vec<String> = routes_stmt
+        .query_map(params![machine_id], |row| row.get(0))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    for item in services {
+        let protocol = item.protocol.as_deref().unwrap_or("http");
+        let source = item.source.as_deref().unwrap_or("system");
+        let default_sub = item
+            .suggested_subdomain
+            .as_deref()
+            .unwrap_or_else(|| &item.name)
+            .to_lowercase()
+            .chars()
+            .filter(|c| c.is_alphanumeric() || *c == '-')
+            .collect::<String>();
+        let sub = if default_sub.is_empty() {
+            format!("port-{}", item.port)
+        } else {
+            default_sub
+        };
+
+        // Check if port is in active routes
+        let port_pattern = format!(":{}", item.port);
+        let is_exposed = active_services.iter().any(|s| s.contains(&port_pattern));
+
+        let id = Uuid::new_v4().to_string();
+
+        conn.execute(
+            "INSERT INTO discovered_services (id, machine_id, name, port, protocol, source, suggested_subdomain, is_exposed, last_seen)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             ON CONFLICT(machine_id, port, protocol) DO UPDATE SET
+               name = excluded.name,
+               source = excluded.source,
+               suggested_subdomain = excluded.suggested_subdomain,
+               is_exposed = excluded.is_exposed,
+               last_seen = excluded.last_seen",
+            params![
+                id,
+                machine_id,
+                item.name,
+                item.port,
+                protocol,
+                source,
+                sub,
+                if is_exposed { 1 } else { 0 },
+                now
+            ],
+        )?;
+    }
+
+    Ok(())
+}
+
+pub fn mark_service_exposure(pool: &DbPool, machine_id: &str, port: u16, is_exposed: bool) -> Result<()> {
+    let conn = pool.lock().unwrap();
+    conn.execute(
+        "UPDATE discovered_services SET is_exposed = ?1 WHERE machine_id = ?2 AND port = ?3",
+        params![if is_exposed { 1 } else { 0 }, machine_id, port],
+    )?;
+    Ok(())
+}
+
+// ---------------- Audit Logs ----------------
 
 pub fn log_event(pool: &DbPool, level: &str, message: &str) {
     if let Ok(conn) = pool.lock() {
@@ -319,4 +546,3 @@ pub fn log_event(pool: &DbPool, level: &str, message: &str) {
         );
     }
 }
-

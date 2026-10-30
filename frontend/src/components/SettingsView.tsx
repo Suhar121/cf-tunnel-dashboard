@@ -31,6 +31,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigured }) => {
   const [apiToken, setApiToken] = useState("");
   const [accountId, setAccountId] = useState("");
   const [serverUrl, setServerUrl] = useState("");
+  const [adminEmail, setAdminEmail] = useState("");
   const [detectedLanIp, setDetectedLanIp] = useState("192.168.29.143");
   const [currentConfig, setCurrentConfig] = useState<CloudflareSettings | null>(null);
   const [zones, setZones] = useState<CloudflareZone[]>([]);
@@ -58,6 +59,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigured }) => {
         setDetectedLanIp(data.detected_lan_ip);
       }
       if (data.account_id) setAccountId(data.account_id);
+      if (data.admin_email) setAdminEmail(data.admin_email);
       if (data.server_url) {
         setServerUrl(data.server_url);
       } else if (data.detected_lan_ip) {
@@ -127,6 +129,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigured }) => {
         api_token: apiToken.trim() || "",
         account_id: accountId.trim(),
         server_url: serverUrl.trim() || undefined,
+        admin_email: adminEmail.trim() || undefined,
       });
 
       setMessage({ type: "success", text: "Cloudflare settings saved and validated successfully!" });
@@ -279,6 +282,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigured }) => {
           />
           <p className="text-[11px] text-neutral-500">
             Found on the right sidebar of any domain overview in your Cloudflare dashboard.
+          </p>
+        </div>
+
+        {/* Default Admin Email for Zero Trust */}
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-medium text-neutral-300 flex items-center gap-1.5">
+              <Shield className="w-3.5 h-3.5 text-orange-400" />
+              Default Admin Email (Cloudflare Zero Trust Access)
+            </label>
+            <span className="text-[10px] text-neutral-500">Optional / Recommended</span>
+          </div>
+          <input
+            type="email"
+            value={adminEmail}
+            onChange={(e) => setAdminEmail(e.target.value)}
+            placeholder="e.g. admin@example.com"
+            className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-xs text-neutral-200 focus:outline-none focus:border-orange-500/60 font-mono"
+          />
+          <p className="text-[11px] text-neutral-500">
+            When protecting subdomains with Cloudflare Access, this email receives the 1-time login PIN OTP. Requires <span className="text-neutral-300">Account.Access: Apps and Policies: Edit</span> token permission.
           </p>
         </div>
 

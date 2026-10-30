@@ -15,6 +15,7 @@ pub struct SaveConfigRequest {
     pub api_token: String,
     pub account_id: String,
     pub server_url: Option<String>,
+    pub admin_email: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -46,12 +47,14 @@ pub async fn get_config_handler(State(pool): State<DbPool>) -> impl IntoResponse
             "account_id": s.account_id,
             "masked_token": masked_token,
             "server_url": effective_url,
+            "admin_email": s.admin_email,
             "detected_lan_ip": detected_ip,
         }))
     } else {
         Json(json!({
             "configured": false,
             "server_url": effective_url,
+            "admin_email": null,
             "detected_lan_ip": detected_ip,
         }))
     }
@@ -85,6 +88,11 @@ pub async fn save_config_handler(
 
     if let Some(ref url) = payload.server_url {
         set_setting(&pool, "server_url", url)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))))?;
+    }
+
+    if let Some(ref email) = payload.admin_email {
+        set_setting(&pool, "cf_admin_email", email)
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))))?;
     }
 

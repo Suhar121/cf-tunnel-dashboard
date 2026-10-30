@@ -20,6 +20,7 @@ import {
   Activity,
   Layers,
   CheckCircle2,
+  Sparkles,
 } from "lucide-react";
 import { Navbar } from "@/components/Navbar";
 import { CreateMachineModal } from "@/components/CreateMachineModal";
@@ -406,6 +407,15 @@ export default function Dashboard() {
                               {m.routes_count || 0} active
                             </span>
                           </div>
+                          {(m.discovered_count ?? 0) > 0 && (
+                            <div className="flex items-center justify-between text-neutral-400">
+                              <span>Auto-Discovered:</span>
+                              <span className="text-blue-400 font-semibold flex items-center gap-1 font-mono text-[10px]">
+                                <Sparkles className="w-3 h-3 text-blue-400" />
+                                {m.discovered_count} services
+                              </span>
+                            </div>
+                          )}
                         </div>
                       </div>
 

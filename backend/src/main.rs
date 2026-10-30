@@ -152,6 +152,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/setup/:token", get(routes::agent::get_setup_script_handler))
         .route("/api/agent/register", post(routes::agent::register_agent_handler))
         .route("/api/agent/heartbeat", post(routes::agent::heartbeat_handler))
+        .route("/api/agent/services", post(routes::agent::report_services_handler))
         .route("/api/logs", get(routes::agent::list_logs_handler))
         // Cloudflare settings & domain management
         .route("/api/cloudflare/config", get(routes::cloudflare::get_config_handler))
@@ -165,6 +166,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/machines/:id", delete(routes::machines::delete_machine_handler))
         .route("/api/machines/:id/routes", post(routes::machines::add_route_handler))
         .route("/api/machines/:id/routes/:route_id", delete(routes::machines::delete_route_handler))
+        .route("/api/machines/:id/routes/:route_id/toggle-protect", post(routes::machines::toggle_route_protect_handler))
+        .route("/api/machines/:id/discovered", get(routes::machines::list_discovered_services_handler))
+        .route("/api/machines/:id/expose-discovered", post(routes::machines::expose_discovered_handler))
         .route("/api/machines/:id/sync", post(routes::machines::sync_machine_handler))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())

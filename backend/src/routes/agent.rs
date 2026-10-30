@@ -8,9 +8,10 @@ use serde_json::json;
 
 use crate::agent_script::generate_bash_script;
 use crate::db::{
-    get_machine_by_token, get_setting, log_event, update_machine_status, DbPool,
+    get_machine_by_token, get_setting, log_event, update_machine_status,
+    upsert_discovered_services, DbPool,
 };
-use crate::models::{HeartbeatPayload, RegisterAgentPayload};
+use crate::models::{AgentServicesPayload, HeartbeatPayload, RegisterAgentPayload};
 
 pub async fn get_setup_script_handler(
     State(pool): State<DbPool>,
@@ -141,6 +142,45 @@ pub async fn heartbeat_handler(
     let _ = update_machine_status(&pool, &machine.id, "online", None, None, None);
 
     (StatusCode::OK, Json(json!({ "success": true })))
+}
+
+pub async fn report_services_handler(
+    State(pool): State<DbPool>,
+    Json(payload): Json<AgentServicesPayload>,
+) -> impl IntoResponse {
+    let machine = match get_machine_by_token(&pool, &payload.setup_token) {
+        Ok(Some(m)) => m,
+        _ => return (StatusCode::NOT_FOUND, Json(json!({ "error": "Invalid token" }))),
+    };
+
+    let count = payload.services.len();
+    if let Err(e) = upsert_discovered_services(&pool, &machine.id, &payload.services) {
+        log_event(
+            &pool,
+            "ERROR",
+            &format!("Failed to record discovered services for {}: {}", machine.name, e),
+        );
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        );
+    }
+
+    let _ = update_machine_status(&pool, &machine.id, "online", None, None, None);
+
+    log_event(
+        &pool,
+        "INFO",
+        &format!(
+            "Node '{}' reported {} discovered local/docker services",
+            machine.name, count
+        ),
+    );
+
+    (
+        StatusCode::OK,
+        Json(json!({ "success": true, "discovered_count": count })),
+    )
 }
 
 pub async fn list_logs_handler(State(pool): State<DbPool>) -> impl IntoResponse {

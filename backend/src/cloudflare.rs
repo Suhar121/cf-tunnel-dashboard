@@ -401,4 +401,139 @@ impl CloudflareClient {
         }
         Ok(())
     }
+
+    /// Find an existing Access application by domain
+    pub async fn find_access_app_by_domain(&self, domain: &str) -> Result<Option<String>> {
+        let url = format!(
+            "https://api.cloudflare.com/client/v4/accounts/{}/access/apps",
+            self.account_id
+        );
+        let resp = self
+            .client
+            .get(&url)
+            .headers(self.headers())
+            .send()
+            .await?;
+
+        let body: Value = resp.json().await?;
+        if let Some(apps) = body["result"].as_array() {
+            for app in apps {
+                if let (Some(id), Some(app_domain)) = (app["id"].as_str(), app["domain"].as_str()) {
+                    if app_domain.eq_ignore_ascii_case(domain) {
+                        return Ok(Some(id.to_string()));
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// Create or configure a Zero Trust Cloudflare Access Application with Email PIN login policy
+    pub async fn create_access_application(
+        &self,
+        name: &str,
+        domain: &str,
+        allowed_emails: &[String],
+    ) -> Result<String> {
+        // Check if an Access Application already exists for this domain
+        let app_id = if let Ok(Some(existing_id)) = self.find_access_app_by_domain(domain).await {
+            existing_id
+        } else {
+            let url = format!(
+                "https://api.cloudflare.com/client/v4/accounts/{}/access/apps",
+                self.account_id
+            );
+
+            let payload = serde_json::json!({
+                "name": name,
+                "domain": domain,
+                "type": "self_hosted",
+                "session_duration": "24h",
+                "auto_redirect_to_identity": false
+            });
+
+            let resp = self
+                .client
+                .post(&url)
+                .headers(self.headers())
+                .json(&payload)
+                .send()
+                .await?;
+
+            let body: Value = resp.json().await?;
+            if !body.get("success").and_then(|v| v.as_bool()).unwrap_or(false) {
+                let err_msg = body["errors"][0]["message"]
+                    .as_str()
+                    .unwrap_or("Failed to create Cloudflare Access application");
+                return Err(anyhow!("{}", err_msg));
+            }
+
+            body["result"]["id"]
+                .as_str()
+                .ok_or_else(|| anyhow!("Missing access application id"))?
+                .to_string()
+        };
+
+        // Attach email authorization policy if emails provided
+        if !allowed_emails.is_empty() {
+            let policy_url = format!(
+                "https://api.cloudflare.com/client/v4/accounts/{}/access/apps/{}/policies",
+                self.account_id, app_id
+            );
+
+            let include_rules: Vec<Value> = allowed_emails
+                .iter()
+                .filter(|e| !e.trim().is_empty())
+                .map(|email| serde_json::json!({ "email": { "email": email.trim() } }))
+                .collect();
+
+            if !include_rules.is_empty() {
+                let policy_payload = serde_json::json!({
+                    "name": "Dashboard Email Allowlist",
+                    "decision": "allow",
+                    "include": include_rules
+                });
+
+                let _ = self
+                    .client
+                    .post(&policy_url)
+                    .headers(self.headers())
+                    .json(&policy_payload)
+                    .send()
+                    .await;
+            }
+        }
+
+        Ok(app_id)
+    }
+
+    /// Delete Cloudflare Access Application
+    pub async fn delete_access_application(&self, app_id: &str) -> Result<()> {
+        let url = format!(
+            "https://api.cloudflare.com/client/v4/accounts/{}/access/apps/{}",
+            self.account_id, app_id
+        );
+
+        let resp = self
+            .client
+            .delete(&url)
+            .headers(self.headers())
+            .send()
+            .await?;
+
+        // 404 or success are both acceptable
+        if resp.status().as_u16() == 404 {
+            return Ok(());
+        }
+
+        let body: Value = resp.json().await?;
+        if !body.get("success").and_then(|v| v.as_bool()).unwrap_or(false) {
+            let err_msg = body["errors"][0]["message"]
+                .as_str()
+                .unwrap_or("Failed to delete Access application");
+            return Err(anyhow!("{}", err_msg));
+        }
+
+        Ok(())
+    }
 }
