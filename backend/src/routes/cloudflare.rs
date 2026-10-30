@@ -64,35 +64,45 @@ pub async fn save_config_handler(
     State(pool): State<DbPool>,
     Json(payload): Json<SaveConfigRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
-    let valid = CloudflareClient::verify_token(&payload.api_token)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "error": format!("Token verification failed: {}", e) })),
-            )
-        })?;
+    let new_token = payload.api_token.trim();
+    let existing_token = get_setting(&pool, "cf_api_token").unwrap_or(None);
 
-    if !valid {
+    if !new_token.is_empty() {
+        let valid = CloudflareClient::verify_token(new_token)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({ "error": format!("Token verification failed: {}", e) })),
+                )
+            })?;
+
+        if !valid {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "Invalid Cloudflare API token" })),
+            ));
+        }
+
+        set_setting(&pool, "cf_api_token", new_token)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))))?;
+    } else if existing_token.is_none() {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "Invalid Cloudflare API token" })),
+            Json(json!({ "error": "API Token is required" })),
         ));
     }
 
-    set_setting(&pool, "cf_api_token", &payload.api_token)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))))?;
-
-    set_setting(&pool, "cf_account_id", &payload.account_id)
+    set_setting(&pool, "cf_account_id", payload.account_id.trim())
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))))?;
 
     if let Some(ref url) = payload.server_url {
-        set_setting(&pool, "server_url", url)
+        set_setting(&pool, "server_url", url.trim())
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))))?;
     }
 
     if let Some(ref email) = payload.admin_email {
-        set_setting(&pool, "cf_admin_email", email)
+        set_setting(&pool, "cf_admin_email", email.trim())
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))))?;
     }
 
@@ -103,9 +113,23 @@ pub async fn save_config_handler(
 }
 
 pub async fn test_token_handler(
+    State(pool): State<DbPool>,
     Json(payload): Json<TestTokenRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
-    let valid = CloudflareClient::verify_token(&payload.api_token)
+    let token = if !payload.api_token.trim().is_empty() {
+        payload.api_token.trim().to_string()
+    } else {
+        get_setting(&pool, "cf_api_token")
+            .unwrap_or(None)
+            .ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({ "error": "No API token provided or saved in settings" })),
+                )
+            })?
+    };
+
+    let valid = CloudflareClient::verify_token(&token)
         .await
         .map_err(|e| {
             (
@@ -121,7 +145,7 @@ pub async fn test_token_handler(
         ));
     }
 
-    let accounts = CloudflareClient::list_accounts(&payload.api_token)
+    let accounts = CloudflareClient::list_accounts(&token)
         .await
         .unwrap_or_default();
 

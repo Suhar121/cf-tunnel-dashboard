@@ -84,7 +84,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigured }) => {
   };
 
   const handleTestToken = async () => {
-    if (!apiToken.trim()) {
+    if (!apiToken.trim() && !currentConfig?.configured) {
       setMessage({ type: "error", text: "Please enter an API token to test" });
       return;
     }
@@ -209,22 +209,33 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onConfigured }) => {
               rel="noopener noreferrer"
               className="text-[11px] text-orange-400 hover:text-orange-300 flex items-center gap-1"
             >
-              <span>Create Token in Cloudflare Dashboard</span>
+              <span>Edit Token in Cloudflare Dashboard</span>
               <ExternalLink className="w-3 h-3" />
             </a>
           </div>
+
+          {currentConfig?.configured && (
+            <div className="flex items-center justify-between px-3.5 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>Active Token Saved: <code className="font-mono font-bold text-white bg-black/40 px-1.5 py-0.5 rounded">{currentConfig.masked_token}</code></span>
+              </div>
+              <span className="text-[10px] text-neutral-400">Leave field below blank to keep</span>
+            </div>
+          )}
+
           <div className="flex gap-2">
             <input
               type="password"
               value={apiToken}
               onChange={(e) => setApiToken(e.target.value)}
-              placeholder={currentConfig?.masked_token ? `Current: ${currentConfig.masked_token}` : "Paste API Token (Bearer ...)"}
+              placeholder={currentConfig?.masked_token ? "Enter new token to replace (or leave blank to keep)" : "Paste API Token (Bearer ...)"}
               className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-xs text-neutral-200 focus:outline-none focus:border-orange-500/60 font-mono"
             />
             <button
               type="button"
               onClick={handleTestToken}
-              disabled={testing || !apiToken}
+              disabled={testing || (!apiToken && !currentConfig?.configured)}
               className="shrink-0 px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-medium rounded-xl transition-all disabled:opacity-40 flex items-center gap-2 cursor-pointer"
             >
               {testing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Radio className="w-3.5 h-3.5 text-orange-400" />}
